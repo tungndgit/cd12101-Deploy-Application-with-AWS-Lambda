@@ -4,7 +4,7 @@ import { createLogger } from '../../utils/logger.mjs'
 
 const logger = createLogger('auth')
 
-const jwksUrl = 'https://test-endpoint.auth0.com/.well-known/jwks.json'
+const jwksUrl = 'https://dev-k7g6m8gnpg6tr2bq.us.auth0.com/.well-known/jwks.json'
 
 export async function handler(event) {
   try {
@@ -44,10 +44,34 @@ export async function handler(event) {
 
 async function verifyToken(authHeader) {
   const token = getToken(authHeader)
-  const jwt = jsonwebtoken.decode(token, { complete: true })
+  const jwt = jsonwebtoken.decode(token, { complete: true });
 
-  // TODO: Implement token verification
-  return undefined;
+  const axiosResponse = await Axios.get(jwksUrl, {
+    headers: {
+      'Content-Type': 'application/json',
+      "Access-Control-Allow-Origin": "*",
+      'Access-Control-Allow-Credentials': true,
+    }
+  });
+  const keys = axiosResponse.data.keys;
+  const signingKeys = keys.filter(key => key.use === 'sig'
+    && key.kty === 'RSA'
+    && key.kid
+    && key.x5c && key.x5c.length
+  ).map(key => {
+    return { kid: key.kid, nbf: key.nbf, publicKey: certToPEM(key.x5c[0]) };
+  });
+  const signingKey = signingKeys.find(key => key.kid === jwt.header.kid);
+
+  if(!signingKey) throw new Error("Sign Key Not Found");
+
+  return jsonwebtoken.verify(token, signingKey.publicKey, { algorithms: ['RS256'] });
+}
+
+function certToPEM(cert) {
+  cert = cert.match(/.{1,64}/g).join('\n');
+  cert = `-----BEGIN CERTIFICATE-----\n${cert}\n-----END CERTIFICATE-----\n`;
+  return cert;
 }
 
 function getToken(authHeader) {
